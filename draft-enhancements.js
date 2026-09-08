@@ -1,10 +1,39 @@
 (function(){
   let selectedPos='P';
-  const slotMap={P:'P',C:'C','1B':'B1','2B':'B2','3B':'B3',SS:'SS',LF:'LF',CF:'CF',RF:'RF'};
+  const slotMap={P:'P',C:'B0','1B':'B1','2B':'B2','3B':'B3',SS:'SS',LF:'LF',CF:'CF',RF:'RF'};
   const posNames={P:'Pitcher',C:'Catcher','1B':'First Base','2B':'Second Base','3B':'Third Base',SS:'Shortstop',LF:'Left Field',CF:'Center Field',RF:'Right Field'};
   const isCompatible=(p,pos)=>pos==='P'?p.position==='P':pos==='C'?p.position==='C':['LF','CF','RF'].includes(pos)?['LF','CF','RF','OF'].includes(p.position):p.position===pos;
+
+  // Extra all-time options keep every position deep even when the MLB Stats API
+  // returns only a few players for an older team/era combination.
+  const extraPool={
+    P:[['Christy Mathewson',97],['Lefty Grove',97],['Steve Carlton',97],['Tom Glavine',95],['Fergie Jenkins',95],['Gaylord Perry',95],['Phil Niekro',94],['John Smoltz',95],['Justin Verlander',97],['Clayton Kershaw',97],['Max Scherzer',96],['Roy Halladay',96],['Greg Maddux',97],['Pedro Martinez',98],['Randy Johnson',98],['Nolan Ryan',96],['Bob Gibson',97],['Sandy Koufax',97],['Mariano Rivera',96],['Cy Young',99]],
+    C:[['Bill Dickey',95],['Gabby Hartnett',95],['Mickey Cochrane',96],['Roy Campanella',96],['Johnny Bench',98],['Yogi Berra',96],['Mike Piazza',97],['Ivan Rodriguez',95],['Carlton Fisk',94],['Gary Carter',94],['Joe Mauer',94],['Buster Posey',95],['Jorge Posada',92],['Salvador Perez',92],['Javy Lopez',91],['Brian McCann',91]],
+    '1B':[['Jimmie Foxx',98],['Lou Gehrig',99],['Hank Greenberg',96],['Johnny Mize',96],['Stan Musial',98],['Willie McCovey',95],['Eddie Murray',95],['Rod Carew',97],['Steve Garvey',92],['Don Mattingly',94],['Frank Thomas',97],['Jeff Bagwell',96],['Jim Thome',95],['Albert Pujols',98],['Miguel Cabrera',96],['Mark McGwire',95],['Adrian Gonzalez',92],['Paul Goldschmidt',94]],
+    '2B':[['Nap Lajoie',98],['Rogers Hornsby',99],['Eddie Collins',98],['Charlie Gehringer',97],['Joe Morgan',97],['Jackie Robinson',98],['Roberto Alomar',94],['Rod Carew',97],['Ryne Sandberg',95],['Craig Biggio',94],['Jeff Kent',93],['Chase Utley',94],['Robinson Cano',93],['Jose Altuve',94],['Dustin Pedroia',94],['Lou Whitaker',94]],
+    '3B':[['Home Run Baker',96],['Eddie Mathews',97],['Mike Schmidt',99],['George Brett',98],['Wade Boggs',97],['Chipper Jones',96],['Adrian Beltre',95],['Brooks Robinson',96],['Ron Santo',95],['Wade Boggs',97],['Evan Longoria',93],['Nolan Arenado',94],['Scott Rolen',94],['Manny Machado',94],['Jose Ramirez',95]],
+    SS:[['Honus Wagner',99],['Joe Cronin',95],['Luke Appling',96],['Arky Vaughan',98],['Ernie Banks',96],['Cal Ripken Jr.',97],['Ozzie Smith',95],['Robin Yount',96],['Alan Trammell',94],['Barry Larkin',94],['Derek Jeter',95],['Alex Rodriguez',98],['Nomar Garciaparra',92],['Francisco Lindor',94],['Carlos Correa',93],['Troy Tulowitzki',94]],
+    LF:[['Babe Ruth',100],['Ted Williams',99],['Stan Musial',98],['Rickey Henderson',98],['Barry Bonds',99],['Carl Yastrzemski',95],['Manny Ramirez',95],['Billy Williams',94],['Willie Stargell',95],['Lou Brock',94],['Jim Rice',93],['Tim Raines',94],['Juan Soto',95],['Christian Yelich',93],['Ronald Acuna Jr.',96]],
+    CF:[['Ty Cobb',99],['Tris Speaker',98],['Joe DiMaggio',97],['Willie Mays',99],['Mickey Mantle',99],['Ken Griffey Jr.',98],['Duke Snider',95],['Harmon Killebrew',95],['Andre Dawson',94],['Kirby Puckett',94],['Vladimir Guerrero',95],['Mike Trout',97],['Carlos Beltran',94],['Andrew McCutchen',93],['Cesar Cedeno',94]],
+    RF:[['Babe Ruth',100],['Hank Aaron',99],['Roberto Clemente',97],['Frank Robinson',96],['Ichiro Suzuki',95],['Sammy Sosa',94],['Al Kaline',96],['Mel Ott',97],['Reggie Jackson',95],['Tony Gwynn',97],['Vladimir Guerrero',95],['Gary Sheffield',94],['Mookie Betts',96],['Aaron Judge',97],['Juan Marichal',90]]
+  };
+
+  function extraPlayers(pos){
+    return (extraPool[pos]||[]).map((x,i)=>({name:x[0],position:pos,team:'All-Time',season:'All-Era',stats:{AVG:'—',OBP:'—',SLG:'—',OPS:'—',HR:'—',RBI:'—'},score:x[1],playerId:`extra-${pos}-${i}-${x[0].replace(/[^a-z0-9]/gi,'').toLowerCase()}`}));
+  }
+  function mergeForPosition(arr,pos){
+    const seen=new Set(); const out=[];
+    [...(arr||[]),...extraPlayers(pos)].forEach(p=>{
+      const key=p.playerId!=null?String(p.playerId):p.name.toLowerCase();
+      if(seen.has(key)) return; seen.add(key); out.push(p);
+    });
+    return out;
+  }
   function openPosition(pos){
     if(!POS.includes(pos)) return;
+    // Once a position is filled, it is locked. Any still-open position can be
+    // selected at any time during the draft.
+    if(roster[pos]) return;
     selectedPos=pos;
     const n=Object.keys(roster).length;
     document.getElementById('round').textContent=`${n<9?n+1:9} OF 9 · ${pos} · ${gameMode.toUpperCase()}${daily?' · DAILY':''}`;
@@ -44,9 +73,9 @@
     selectedPos=pos; document.getElementById('count').textContent='Loading MLB players…';
     try{
       const r=await api(`/player-database/top?team=${encodeURIComponent(team)}&era=${encodeURIComponent(era)}&limit=100`);
-      players=r.players||[]; renderPlayers(pos);
+      players=mergeForPosition(r.players||[],pos); renderPlayers(pos);
     }catch(e){
-      players=(data.players[pos]||[]).map(x=>({name:x.name,position:pos,team,season:'',stats:{AVG:'—',OPS:'—',HR:'—',RBI:'—'},score:x.rating}));
+      players=mergeForPosition((data.players[pos]||[]).map(x=>({name:x.name,position:pos,team,season:'',stats:{AVG:'—',OPS:'—',HR:'—',RBI:'—'},score:x.rating,playerId:`base-${pos}-${x.name}`})),pos);
       renderPlayers(pos);
     }
   };
@@ -72,14 +101,14 @@
   };
   window.pickPlayer=function(p){
     const pos=selectedPos||firstEmpty()||'P';
+    if(roster[pos]){alert(`${posNames[pos]||pos} is already filled. Select another open position.`);return}
     if(!isCompatible(p,pos)){alert(`Choose a ${posNames[pos]||pos} player for this position.`);return}
-    const replacing=!!roster[pos];
-    roster[pos]={...p,rating:Math.round(Math.min(99,Math.max(70,(p.score||88)/10))),offense:88,defense:88,era:document.getElementById('era').textContent,team:document.getElementById('team').textContent};
-    const slot=document.querySelector('.slot.'+slotMap[pos]);slot.classList.add('filled');slot.innerHTML=`${p.name}<small>${p.position||pos}</small>`;
+    roster[pos]={...p,rating:Math.round(Math.min(99,Math.max(70,(p.score||88)))),offense:Math.min(99,p.score||88),defense:Math.min(99,p.score||88),era:document.getElementById('era').textContent,team:document.getElementById('team').textContent};
+    const slot=document.querySelector('.slot.'+slotMap[pos]);if(slot){slot.classList.add('filled');slot.innerHTML=`${p.name}<small>${p.position||pos}</small>`;slot.style.outline='none';}
     document.getElementById('draftCount').textContent=`${Object.keys(roster).length}/9`;
     if(Object.keys(roster).length>=9) return finishDraft();
-    // Replacements stay on the selected position. Empty positions continue normally.
-    if(replacing){openPosition(pos);return}
+    // After a pick, automatically move to the next open position, but the user
+    // can click any other open diamond position instead.
     nextRound();
   };
   document.querySelectorAll('.slot').forEach(s=>s.addEventListener('click',()=>openPosition(s.dataset.pos)));
