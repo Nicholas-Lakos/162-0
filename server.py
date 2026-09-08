@@ -5,7 +5,6 @@ from urllib.request import urlopen
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 DB=os.getenv('DB_PATH','1620.db'); app=FastAPI(title='162–0 Baseball')
 app.add_middleware(CORSMiddleware,allow_origins=['*'],allow_methods=['*'],allow_headers=['*'])
 POSITIONS=['P','C','1B','2B','3B','SS','LF','CF','RF']
@@ -59,18 +58,18 @@ def _stat_players(team,season,group):
    era=float(st.get('era',99) or 99); score=(10-max(0,era))*100+float(st.get('wins',0) or 0)*1.5+float(st.get('strikeOuts',0) or 0)*.04+float(st.get('saves',0) or 0)*.5; stats={'ERA':st.get('era','—'),'WHIP':st.get('whip','—'),'W':st.get('wins','—'),'K':st.get('strikeOuts','—'),'SV':st.get('saves','—'),'IP':st.get('inningsPitched','—')}
   out.append({'name':name,'position':pos,'team':team,'season':season,'stats':stats,'score':score,'playerId':p.get('id')})
  return out
-def top_players(team,era):
- season=_season_for(team,era); hitters=_stat_players(team,season,'hitting'); pitchers=_stat_players(team,season,'pitching'); hitters.sort(key=lambda x:x['score'],reverse=True); pitchers.sort(key=lambda x:x['score'],reverse=True); pool=hitters[:15]+pitchers[:5]; pool.sort(key=lambda x:x['score'],reverse=True)
- for i,p in enumerate(pool[:20],1): p['rank']=i
- return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'players':pool[:20]}
+def top_players(team,era,limit=60):
+ season=_season_for(team,era); hitters=_stat_players(team,season,'hitting'); pitchers=_stat_players(team,season,'pitching'); hitters.sort(key=lambda x:x['score'],reverse=True); pitchers.sort(key=lambda x:x['score'],reverse=True); pool=hitters[:45]+pitchers[:25]; pool.sort(key=lambda x:x['score'],reverse=True); pool=pool[:max(20,min(int(limit),70))]
+ for i,p in enumerate(pool,1): p['rank']=i
+ return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'players':pool}
 @app.get('/api/health')
-def health(): return {'ok':True,'service':'162-0','version':'3.0'}
+def health(): return {'ok':True,'service':'162-0','version':'3.1'}
 @app.get('/api/players')
 def players(): return {'positions':POSITIONS,'positionNames':POSITION_NAMES,'players':{p:[{'name':n,'rating':r,'offense':r,'defense':r,'clutch':r,'position':p} for n,r in vals] for p,vals in PLAYERS.items()},'teams':TEAMS,'teamNames':TEAM_NAMES,'eras':ERAS}
 @app.get('/api/player-database/top')
-def player_database_top(team:str,era:str):
+def player_database_top(team:str,era:str,limit:int=Query(60,ge=20,le=70)):
  if team not in TEAM_IDS or era not in ERAS: raise HTTPException(400,'Invalid team or era')
- return top_players(team,era)
+ return top_players(team,era,limit)
 @app.get('/api/player-database/draft')
 def player_database_draft(team:str,era:str,position:str):
  if team not in TEAM_IDS or era not in ERAS or position not in POSITIONS: raise HTTPException(400,'Invalid team, era, or position')
@@ -83,7 +82,7 @@ def player_database_draft(team:str,era:str,position:str):
   if position in ('LF','CF','RF'): return pos in ('LF','CF','RF','OF')
   return pos==position
  pool=[p for p in candidates if eligible(p)]; pool.sort(key=lambda x:x['score'],reverse=True)
- return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'position':position,'players':pool[:3]}
+ return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'position':position,'players':pool[:10]}
 @app.get('/api/player-database/search')
 def player_database_search(q:str=Query(...,min_length=1)):
  q=q.strip().lower(); results=[]; d=_api('sports/1/players',{'season':2026}); people=d.get('people',[]); matches=[p for p in people if q in p.get('fullName','').lower()][:30]
@@ -129,6 +128,8 @@ def stats(username:str):
  c=db(); rows=c.execute('SELECT wins,losses,roster,created,mode FROM games WHERE username=? ORDER BY wins DESC,id ASC',(username,)).fetchall(); c.close(); return {'gamesPlayed':len(rows),'bestWins':rows[0][0] if rows else 0,'bestLosses':rows[0][1] if rows else 162,'perfectSeasons':sum(r[0]==162 for r in rows),'bestRoster':json.loads(rows[0][2]) if rows else {},'history':[{'wins':r[0],'losses':r[1],'mode':r[4],'created':r[3]} for r in rows[:10]]}
 @app.get('/players')
 def player_browser(): return FileResponse('players.html')
+@app.get('/draft-enhancements.js')
+def draft_enhancements(): return FileResponse('draft-enhancements.js',media_type='application/javascript')
 @app.get('/')
 def index():
- html=open('index.html','r',encoding='utf-8').read(); inject='<a href="/players" style="margin-left:12px;color:#ffb02e;font-weight:800;text-decoration:none">PLAYER DATABASE</a>'; return HTMLResponse(html.replace('</header>',inject+'</header>'))
+ html=open('index.html','r',encoding='utf-8').read(); inject='<a href="/players" style="margin-left:12px;color:#ffb02e;font-weight:800;text-decoration:none">PLAYER DATABASE</a>'; html=html.replace('</header>',inject+'</header>'); html=html.replace('</body>','<script src="/draft-enhancements.js?v=3.1"></script></body>'); return HTMLResponse(html)
