@@ -2,6 +2,7 @@
   let selectedPos='P';
   const slotMap={P:'P',C:'C','1B':'B1','2B':'B2','3B':'B3',SS:'SS',LF:'LF',CF:'CF',RF:'RF'};
   const posNames={P:'Pitcher',C:'Catcher','1B':'First Base','2B':'Second Base','3B':'Third Base',SS:'Shortstop',LF:'Left Field',CF:'Center Field',RF:'Right Field'};
+  const isCompatible=(p,pos)=>pos==='P'?p.position==='P':pos==='C'?p.position==='C':['LF','CF','RF'].includes(pos)?['LF','CF','RF','OF'].includes(p.position):p.position===pos;
   function openPosition(pos){
     if(!POS.includes(pos)) return;
     selectedPos=pos;
@@ -40,9 +41,9 @@
   };
   window.loadPlayers=async function(posOverride){
     const team=document.getElementById('team').textContent, era=document.getElementById('era').textContent, pos=posOverride||selectedPos||firstEmpty()||'P';
-    selectedPos=pos; document.getElementById('count').textContent='Loading players…';
+    selectedPos=pos; document.getElementById('count').textContent='Loading MLB players…';
     try{
-      const r=await api(`/player-database/top?team=${encodeURIComponent(team)}&era=${encodeURIComponent(era)}&limit=60`);
+      const r=await api(`/player-database/top?team=${encodeURIComponent(team)}&era=${encodeURIComponent(era)}&limit=100`);
       players=r.players||[]; renderPlayers(pos);
     }catch(e){
       players=(data.players[pos]||[]).map(x=>({name:x.name,position:pos,team,season:'',stats:{AVG:'—',OPS:'—',HR:'—',RBI:'—'},score:x.rating}));
@@ -52,8 +53,10 @@
   window.renderPlayers=function(currentPos){
     const q=document.getElementById('playerSearch').value.trim().toLowerCase(),sort=document.getElementById('sort').value;
     let arr=players.filter(p=>{
-      const compatible=currentPos==='P'?p.position==='P':currentPos==='C'?p.position==='C':['LF','CF','RF'].includes(currentPos)?['LF','CF','RF','OF'].includes(p.position):p.position===currentPos;
-      return compatible&&(!q||p.name.toLowerCase().includes(q));
+      const filter=activeFilter||'ALL';
+      const compatible=isCompatible(p,currentPos);
+      const filterMatch=filter==='ALL'||(filter==='P'&&p.position==='P')||(filter==='C'&&p.position==='C')||(filter==='G'&&['1B','2B','3B','SS'].includes(p.position))||(filter==='F'&&['LF','CF','RF','OF'].includes(p.position));
+      return compatible&&filterMatch&&(!q||p.name.toLowerCase().includes(q));
     });
     arr=arr.filter(p=>!Object.values(roster).some(x=>x&&x.playerId&&p.playerId&&x.playerId===p.playerId));
     arr.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):(b.score||0)-(a.score||0));
@@ -69,12 +72,14 @@
   };
   window.pickPlayer=function(p){
     const pos=selectedPos||firstEmpty()||'P';
-    const compatible=pos==='P'?p.position==='P':pos==='C'?p.position==='C':['LF','CF','RF'].includes(pos)?['LF','CF','RF','OF'].includes(p.position):p.position===pos;
-    if(!compatible){alert(`Choose a ${posNames[pos]||pos} player for this position.`);return}
+    if(!isCompatible(p,pos)){alert(`Choose a ${posNames[pos]||pos} player for this position.`);return}
+    const replacing=!!roster[pos];
     roster[pos]={...p,rating:Math.round(Math.min(99,Math.max(70,(p.score||88)/10))),offense:88,defense:88,era:document.getElementById('era').textContent,team:document.getElementById('team').textContent};
     const slot=document.querySelector('.slot.'+slotMap[pos]);slot.classList.add('filled');slot.innerHTML=`${p.name}<small>${p.position||pos}</small>`;
     document.getElementById('draftCount').textContent=`${Object.keys(roster).length}/9`;
     if(Object.keys(roster).length>=9) return finishDraft();
+    // Replacements stay on the selected position. Empty positions continue normally.
+    if(replacing){openPosition(pos);return}
     nextRound();
   };
   document.querySelectorAll('.slot').forEach(s=>s.addEventListener('click',()=>openPosition(s.dataset.pos)));
