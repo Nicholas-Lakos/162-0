@@ -12,7 +12,9 @@ POSITION_NAMES={'P':'Pitcher','C':'Catcher','1B':'First Base','2B':'Second Base'
 TEAMS=['NYY','BOS','LAD','SFG','CHC','ATL','STL','NYM','SEA','DET','HOU','OAK','PHI','BAL','CLE','MIN','CIN','PIT','SD','TOR']
 TEAM_IDS={'NYY':147,'BOS':111,'LAD':119,'SFG':137,'CHC':112,'ATL':144,'STL':138,'NYM':121,'SEA':136,'DET':116,'HOU':117,'OAK':133,'PHI':143,'BAL':110,'CLE':114,'MIN':142,'CIN':113,'PIT':134,'SD':135,'TOR':141}
 TEAM_NAMES={'NYY':'New York Yankees','BOS':'Boston Red Sox','LAD':'Los Angeles Dodgers','SFG':'San Francisco Giants','CHC':'Chicago Cubs','ATL':'Atlanta Braves','STL':'St. Louis Cardinals','NYM':'New York Mets','SEA':'Seattle Mariners','DET':'Detroit Tigers','HOU':'Houston Astros','OAK':'Oakland Athletics','PHI':'Philadelphia Phillies','BAL':'Baltimore Orioles','CLE':'Cleveland Guardians','MIN':'Minnesota Twins','CIN':'Cincinnati Reds','PIT':'Pittsburgh Pirates','SD':'San Diego Padres','TOR':'Toronto Blue Jays'}
-ERAS=['1920s','1930s','1940s','1950s','1960s','1970s','1980s','1990s','2000s','2010s','2020s']; ERA_YEARS={e:int(e[:4])+5 for e in ERAS}
+# Draft eras intentionally begin in the 1960s. Each era represents the full decade, not one representative season.
+ERAS=['1960s','1970s','1980s','1990s','2000s','2010s','2020s']
+ERA_RANGES={e:(int(e[:4]),int(e[:4])+9) for e in ERAS}
 PLAYERS={'P':[('Sandy Koufax',97),('Pedro Martinez',98),('Randy Johnson',98),('Walter Johnson',99),('Greg Maddux',97),('Cy Young',99),('Nolan Ryan',96),('Tom Seaver',96),('Bob Gibson',97),('Mariano Rivera',96)],'C':[('Johnny Bench',98),('Yogi Berra',96),('Mike Piazza',97),('Roy Campanella',96),('Ivan Rodriguez',95),('Josh Gibson',99),('Carlton Fisk',94),('Gary Carter',94)],'1B':[('Lou Gehrig',99),('Albert Pujols',98),('Frank Thomas',97),('Jimmie Foxx',98),('Willie McCovey',95),('Hank Greenberg',96),('Miguel Cabrera',96)],'2B':[('Rogers Hornsby',99),('Joe Morgan',97),('Jackie Robinson',98),('Roberto Alomar',94),('Nap Lajoie',98),('Rod Carew',97),('Jeff Kent',93)],'3B':[('Mike Schmidt',99),('George Brett',98),('Wade Boggs',97),('Eddie Mathews',97),('Chipper Jones',96),('Adrian Beltre',95)],'SS':[('Derek Jeter',95),('Cal Ripken Jr.',97),('Honus Wagner',99),('Alex Rodriguez',98),('Ozzie Smith',95),('Ernie Banks',96),('Barry Larkin',94)],'LF':[('Ted Williams',99),('Barry Bonds',99),('Rickey Henderson',98),('Stan Musial',98),('Manny Ramirez',95),('Carl Yastrzemski',95)],'CF':[('Willie Mays',99),('Ken Griffey Jr.',98),('Mickey Mantle',99),('Ty Cobb',99),('Joe DiMaggio',97),('Mike Trout',97)],'RF':[('Hank Aaron',99),('Babe Ruth',100),('Ichiro Suzuki',95),('Roberto Clemente',97),('Frank Robinson',96),('Sammy Sosa',94)]}
 TRIVIA=[(1,'Which team broke an 86-year World Series drought in 2004?',['Boston Red Sox','Chicago Cubs','Cleveland Indians','New York Mets'],0),(1,'How many outs are in a standard half-inning?',['2','3','4','6'],1),(2,'Who threw a perfect game for the Yankees in 1956?',['Don Larsen','Whitey Ford','Allie Reynolds','Bob Feller'],0),(2,'Who holds MLB’s all-time career hits record?',['Derek Jeter','Pete Rose','Ty Cobb','Ichiro Suzuki'],1),(3,'Who won the 2016 World Series?',['Cubs','Indians','Red Sox','Mets'],0),(3,'Which pitcher recorded the most career saves?',['Trevor Hoffman','Mariano Rivera','Lee Smith','Rollie Fingers'],1),(4,'Who was the first unanimous AL MVP?',['Mike Trout','Bryce Harper','Miguel Cabrera','Babe Ruth'],0),(4,'Which franchise drafted Cal Ripken Jr.?',['Orioles','Yankees','Red Sox','Twins'],0),(5,'Who won the Triple Crown and MVP in the same season twice?',['Ted Williams','Miguel Cabrera','Mickey Mantle','Frank Robinson'],0),(5,'Who owns the MLB single-season strikeout record?',['Nolan Ryan','Randy Johnson','Pedro Martinez','Matt Kilroy'],3)]
 class Draft(BaseModel): mode:str='Classic'; team:str=''; era:str=''; roster:dict; username:str=''
@@ -34,19 +36,10 @@ def _api(path,params):
   with urlopen('https://statsapi.mlb.com/api/v1/'+path+'?'+urlencode(params),timeout=12) as r: data=json.loads(r.read().decode('utf-8'))
  except Exception: data={}
  _player_cache[key]=data; return data
-def _season_for(team,era):
- target=ERA_YEARS.get(era,2025); tid=TEAM_IDS.get(team)
- if not tid:return target
- for delta in [0,-1,1,-2,2,-3,3,-4,4,-5,5,10,-10]:
-  y=target+delta
-  if y<1876 or y>2026: continue
-  d=_api('teams/'+str(tid)+'/roster',{'season':y,'rosterType':'fullRoster'})
-  if d.get('roster'): return y
- return target
 def _stat_players(team,season,group):
  tid=TEAM_IDS.get(team)
  if not tid:return []
- d=_api('stats',{'stats':'season','group':group,'season':season,'teamId':tid,'limit':100,'sportIds':1}); splits=d.get('stats',[])
+ d=_api('stats',{'stats':'season','group':group,'season':season,'teamId':tid,'limit':1000,'sportIds':1}); splits=d.get('stats',[])
  if len(splits)==1 and isinstance(splits[0],dict) and 'splits' in splits[0]: splits=splits[0]['splits']
  out=[]
  for s in splits:
@@ -58,23 +51,33 @@ def _stat_players(team,season,group):
    era=float(st.get('era',99) or 99); score=(10-max(0,era))*100+float(st.get('wins',0) or 0)*1.5+float(st.get('strikeOuts',0) or 0)*.04+float(st.get('saves',0) or 0)*.5; stats={'ERA':st.get('era','—'),'WHIP':st.get('whip','—'),'W':st.get('wins','—'),'K':st.get('strikeOuts','—'),'SV':st.get('saves','—'),'IP':st.get('inningsPitched','—')}
   out.append({'name':name,'position':pos,'team':team,'season':season,'stats':stats,'score':score,'playerId':p.get('id')})
  return out
-def top_players(team,era,limit=60):
- season=_season_for(team,era); hitters=_stat_players(team,season,'hitting'); pitchers=_stat_players(team,season,'pitching'); hitters.sort(key=lambda x:x['score'],reverse=True); pitchers.sort(key=lambda x:x['score'],reverse=True); pool=hitters[:45]+pitchers[:25]; pool.sort(key=lambda x:x['score'],reverse=True); pool=pool[:max(20,min(int(limit),70))]
- for i,p in enumerate(pool,1): p['rank']=i
- return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'players':pool}
+def players_for_era(team,era):
+ # Collect every player who actually appeared for the selected franchise in any season of the selected decade.
+ start,end=ERA_RANGES[era]; all_players={}
+ for season in range(start,end+1):
+  for group in ('hitting','pitching'):
+   for p in _stat_players(team,season,group):
+    key=p.get('playerId') or f"{p['name']}|{p['position']}"
+    # Keep the player's best statistical season for the card while retaining only one card per player.
+    if key not in all_players or float(p.get('score',0))>float(all_players[key].get('score',0)): all_players[key]=p
+ players=list(all_players.values()); players.sort(key=lambda x:x.get('score',0),reverse=True)
+ for i,p in enumerate(players,1): p['rank']=i
+ return players
+def top_players(team,era,limit=500):
+ pool=players_for_era(team,era)
+ return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':f'{ERA_RANGES[era][0]}-{ERA_RANGES[era][1]}','totalPlayers':len(pool),'players':pool}
 @app.get('/api/health')
-def health(): return {'ok':True,'service':'162-0','version':'3.1'}
+def health(): return {'ok':True,'service':'162-0','version':'4.0'}
 @app.get('/api/players')
 def players(): return {'positions':POSITIONS,'positionNames':POSITION_NAMES,'players':{p:[{'name':n,'rating':r,'offense':r,'defense':r,'clutch':r,'position':p} for n,r in vals] for p,vals in PLAYERS.items()},'teams':TEAMS,'teamNames':TEAM_NAMES,'eras':ERAS}
 @app.get('/api/player-database/top')
-def player_database_top(team:str,era:str,limit:int=Query(60,ge=20,le=70)):
+def player_database_top(team:str,era:str,limit:int=Query(500,ge=20,le=1000)):
  if team not in TEAM_IDS or era not in ERAS: raise HTTPException(400,'Invalid team or era')
  return top_players(team,era,limit)
 @app.get('/api/player-database/draft')
 def player_database_draft(team:str,era:str,position:str):
  if team not in TEAM_IDS or era not in ERAS or position not in POSITIONS: raise HTTPException(400,'Invalid team, era, or position')
- season=_season_for(team,era); candidates=[]
- for group in ('hitting','pitching'): candidates.extend(_stat_players(team,season,group))
+ candidates=players_for_era(team,era)
  def eligible(p):
   pos=p.get('position','')
   if position=='P': return pos=='P'
@@ -82,10 +85,14 @@ def player_database_draft(team:str,era:str,position:str):
   if position in ('LF','CF','RF'): return pos in ('LF','CF','RF','OF')
   return pos==position
  pool=[p for p in candidates if eligible(p)]; pool.sort(key=lambda x:x['score'],reverse=True)
- return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':season,'position':position,'players':pool[:10]}
+ return {'team':team,'teamName':TEAM_NAMES.get(team,team),'era':era,'season':f'{ERA_RANGES[era][0]}-{ERA_RANGES[era][1]}','position':position,'totalPlayers':len(pool),'players':pool}
 @app.get('/api/player-database/search')
-def player_database_search(q:str=Query(...,min_length=1)):
- q=q.strip().lower(); results=[]; d=_api('sports/1/players',{'season':2026}); people=d.get('people',[]); matches=[p for p in people if q in p.get('fullName','').lower()][:30]
+def player_database_search(q:str=Query(...,min_length=1),team:str='',era:str=''):
+ q=q.strip().lower()
+ if team and era and team in TEAM_IDS and era in ERAS:
+  results=[p for p in players_for_era(team,era) if q in p.get('name','').lower()]
+  return {'query':q,'team':team,'era':era,'players':results}
+ results=[]; d=_api('sports/1/players',{'season':2026}); people=d.get('people',[]); matches=[p for p in people if q in p.get('fullName','').lower()][:100]
  for p in matches:
   pid=p.get('id'); position=(p.get('primaryPosition') or {}).get('abbreviation',''); h=_api('people/'+str(pid),{}); person=(h.get('people') or [{}])[0] if h else p; s=_api('people/'+str(pid)+'/stats',{'stats':'yearByYear','group':'hitting'}); splits=s.get('stats',[])
   if len(splits)==1 and isinstance(splits[0],dict) and 'splits' in splits[0]: splits=splits[0]['splits']
@@ -132,4 +139,4 @@ def player_browser(): return FileResponse('players.html')
 def draft_enhancements(): return FileResponse('draft-enhancements.js',media_type='application/javascript')
 @app.get('/')
 def index():
- html=open('index.html','r',encoding='utf-8').read(); inject='<a href="/players" style="margin-left:12px;color:#ffb02e;font-weight:800;text-decoration:none">PLAYER DATABASE</a>'; html=html.replace('</header>',inject+'</header>'); html=html.replace('</body>','<script src="/draft-enhancements.js?v=3.1"></script></body>'); return HTMLResponse(html)
+ html=open('index.html','r',encoding='utf-8').read(); inject='<a href="/players" style="margin-left:12px;color:#ffb02e;font-weight:800;text-decoration:none">PLAYER DATABASE</a>'; html=html.replace('</header>',inject+'</header>'); html=html.replace('</body>','<script src="/draft-enhancements.js?v=4.0"></script></body>'); return HTMLResponse(html)
