@@ -1,5 +1,14 @@
 """Runtime compatibility patch for the 162-0 Render service."""
 from pathlib import Path
+import builtins
+
+# server.py currently references BaseModel without importing it. Make it
+# available during module execution so the existing live app can start.
+try:
+    from pydantic import BaseModel
+    builtins.BaseModel = BaseModel
+except Exception:
+    pass
 
 p = Path(__file__).with_name('server.py')
 if p.exists():
