@@ -3,7 +3,7 @@ services:
     name: 162-0
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python patch_server.py
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DB_PATH
